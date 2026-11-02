@@ -1,0 +1,16 @@
+{
+  "id":"colab-provisioner",
+  "name":"Colab Provisioner (Community Beta)",
+  "version":"1.0.0-beta.1",
+  "description":"Operator-controlled Google Colab runtime management. No public Ollama tunnels or automatic GPU billing.",
+  "activation":{"onCapabilities":["hook"]},
+  "configSchema":{
+    "type":"object","additionalProperties":false,
+    "properties":{
+      "enabled":{"type":"boolean","default":true},
+      "mode":{"type":"string","enum":["observe","manual"],"default":"observe"},
+      "telegramCommands":{"type":"boolean","default":false},
+      "allowedTelegramIds":{"type":"array","items":{"type":"string"},"default":[]}
+    }
+  }
+}

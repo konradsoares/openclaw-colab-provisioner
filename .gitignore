@@ -1,0 +1,9 @@
+node_modules/
+.env
+.env.*
+!.env.example
+*.token
+*credentials*.json
+*.log
+.DS_Store
+.ipynb_checkpoints/

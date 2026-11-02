@@ -1,0 +1,11 @@
+{
+  "name": "openclaw-colab-provisioner-community",
+  "version": "1.0.0-beta.1",
+  "type": "module",
+  "description": "Opt-in Google Colab runtime management for OpenClaw",
+  "license": "MIT",
+  "bin": {"colabctl": "./bin/colabctl.mjs"},
+  "scripts": {"test":"node --test tests/*.test.mjs", "check":"node --check index.js && node --check lib/colab-api.mjs && node --check bin/colabctl.mjs"},
+  "engines":{"node":">=22"},
+  "openclaw":{"extensions":["./index.js"]}
+}
