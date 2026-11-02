@@ -1,16 +1,40 @@
 {
-  "id":"colab-provisioner",
-  "name":"Colab Provisioner (Community Beta)",
-  "version":"1.0.0-beta.1",
-  "description":"Operator-controlled Google Colab runtime management. No public Ollama tunnels or automatic GPU billing.",
-  "activation":{"onCapabilities":["hook"]},
-  "configSchema":{
-    "type":"object","additionalProperties":false,
-    "properties":{
-      "enabled":{"type":"boolean","default":true},
-      "mode":{"type":"string","enum":["observe","manual"],"default":"observe"},
-      "telegramCommands":{"type":"boolean","default":false},
-      "allowedTelegramIds":{"type":"array","items":{"type":"string"},"default":[]}
+  "id": "colab-provisioner",
+  "name": "OpenClaw Colab Provisioner",
+  "version": "1.3.0-beta.3",
+  "description": "Google Colab runtime provisioning with optional MCP, OpenAI-compatible gateway, and on-demand GPU Autopilot.",
+  "activation": {
+    "onCapabilities": [
+      "hook"
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "mode": {
+        "type": "string",
+        "enum": [
+          "observe",
+          "manual"
+        ],
+        "default": "observe"
+      },
+      "telegramCommands": {
+        "type": "boolean",
+        "default": false
+      },
+      "allowedTelegramIds": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": []
+      }
     }
   }
 }

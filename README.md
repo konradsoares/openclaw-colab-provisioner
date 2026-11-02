@@ -1,152 +1,182 @@
-# OpenClaw Colab Provisioner (v1 community beta)
+# OpenClaw Colab Provisioner
 
-Experimental, **operator-controlled** Google Colab runtime management for OpenClaw. Designed as an independent companion to [OpenClaw Smart Router](https://github.com/konradsoares/openclaw-smart-router).
+Run an OpenAI-compatible local gateway backed by an on-demand Google Colab T4 GPU. The gateway creates a runtime and Jupyter session, installs Ollama, pulls a model, and releases its own runtime after a configurable idle period.
 
-> **Scope of v1:** official Colab API discovery, eligible runtime listing, explicit create/delete operations, optional read-only Telegram help, and an interactive Ollama notebook. **Not yet an automatic LLM inference backend.** Nothing provisions a GPU automatically. Account eligibility, quotas, and compute-unit charges must be confirmed with Google. No public ngrok tunnels are created.
+**Version:** 1.3.0-beta.3 · **Requirements:** Node.js 22+, `gcloud`, `curl`, `openssl`, a Linux host running systemd user services, and a Google Colab account eligible for T4 Standard runtimes.
 
-## Architecture
+The gateway listens on `127.0.0.1:18080`. It does not expose the Colab runtime to the public internet. Colab usage may consume compute units. Availability and session lifetime depend on Google.
 
-```text
-OpenClaw gateway (optional !colab status/help)
-              |
-       colabctl (operator CLI)
-              |
-       Google Colab REST v1beta
-              |
-     Runtime specs / list / create / delete
-              |
- Interactive Colab notebook (separate experiment)
-              |
-       Ollama + model (manual, local notebook execution)
-```
-
-## Prerequisites
-
-- Node.js 22+; tests validated with Node.js 24
-- OpenClaw with plugin support
-- A Google account with access to Colab Runtime API and eligible compute resources (AI Pro does not guarantee API access)
-- An OAuth access token for `https://www.googleapis.com/auth/colaboratory`; read-only discovery can use the `.readonly` scope
-- The Google Colab API enabled in a Google Cloud project if your OAuth flow requires it
-- GPU capacity/compute units available in your Colab account
-
-**Important:** An ordinary Gemini API key does **not** authorize the Colab runtime API. The plugin never asks you to put Google access tokens into `openclaw.json`.
-
-## Install directly from GitHub
+## Installation
 
 ```bash
-openclaw plugins install git:github.com/YOUR_USERNAME/openclaw-colab-provisioner@main
-openclaw plugins enable colab-provisioner
-openclaw plugins inspect colab-provisioner --runtime --json
-openclaw plugins doctor
-```
-
-Review and approve installation permissions. OpenClaw's Git installs require explicit trust approval. If you use `plugins.allow`, make sure `colab-provisioner` is included.
-
-### Configure OpenClaw (safe defaults)
-
-```bash
-openclaw config set plugins.entries.colab-provisioner.config.enabled true
-openclaw config set plugins.entries.colab-provisioner.config.mode observe
-openclaw config set plugins.entries.colab-provisioner.config.telegramCommands false
-openclaw config get plugins.entries.colab-provisioner
-```
-
-`observe` does not intercept Telegram messages or create runtimes. GPU operations only happen through an explicit command on the Gateway host.
-
-Optional Telegram read-only helper (not needed for CLI management):
-
-```bash
-openclaw config set plugins.entries.colab-provisioner.config.mode manual
-openclaw config set plugins.entries.colab-provisioner.config.telegramCommands true
-openclaw config set plugins.entries.colab-provisioner.config.allowedTelegramIds '["YOUR_NUMERIC_TELEGRAM_USER_ID"]'
-```
-
-Then send `!colab status` or `!colab help` to your Telegram bot. This replies with a static instruction message; it does not consult the Colab API. Other messages are not intercepted.
-
-## Use the CLI
-
-**The npm package is not published to npm.** The CLI is included in this Git repository. A Git-managed OpenClaw install lives in a host-managed directory that you can locate with `openclaw plugins inspect colab-provisioner --runtime --json`. For easiest operator usage, clone the repository separately:
-
-```bash
-cd ~/Documents/Projects
-git clone https://github.com/YOUR_USERNAME/openclaw-colab-provisioner.git
+unzip openclaw-colab-provisioner-v1.3.0-beta.3.zip
 cd openclaw-colab-provisioner
 npm test
-npm run check
-node bin/colabctl.mjs help
 ```
 
-### OAuth access
+Existing installations can be upgraded by copying the release into the project directory; keep `~/.config/openclaw-colab/gateway.env` and the Google ADC credentials outside the repository.
 
-Get a **short-lived, user-authorized OAuth access token** with scope `https://www.googleapis.com/auth/colaboratory` through a Google OAuth flow you control, such as a Google Cloud OAuth desktop app. Do not use a Gemini key or paste a token into GitHub, Telegram, or ChatGPT. You can use a Google-approved OAuth client flow or an appropriately configured `gcloud auth application-default login --scopes=...` if your version and account allow that scope.
+### Google OAuth
 
-For a temporary shell session:
+Create a **Desktop** OAuth client in your Google Cloud project. In Google Auth Platform, add your Google account under **Audience → Test users** while the application is in Testing mode. Save the client JSON outside the repository.
 
 ```bash
-read -rsp 'Paste short-lived Colab OAuth access token: ' COLAB_ACCESS_TOKEN; echo
-export COLAB_ACCESS_TOKEN
+mkdir -p ~/.config/openclaw-colab
+chmod 700 ~/.config/openclaw-colab
+# Save your downloaded OAuth Desktop client as:
+# ~/.config/openclaw-colab/oauth-client.json
+chmod 600 ~/.config/openclaw-colab/oauth-client.json
+
+gcloud auth application-default login \
+  --client-id-file="$HOME/.config/openclaw-colab/oauth-client.json" \
+  --scopes="openid,https://www.googleapis.com/auth/userinfo.email,https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/colaboratory"
+
+gcloud auth application-default print-access-token >/dev/null && echo 'ADC ready'
+```
+
+The consent process may require Google approval depending on account and scope policy. Testing-mode OAuth authorizations may expire after seven days.
+
+Verify Colab access:
+
+```bash
+node bin/colabmcp.mjs gpu status
 node bin/colabctl.mjs specs
 ```
 
-The tool does not persist access tokens. Use `unset COLAB_ACCESS_TOKEN` when finished. Your OAuth flow may need reauthorization on expiry. API errors `403 PERMISSION_DENIED` or `FAILED_PRECONDITION` can indicate insufficient scopes, project/API restrictions, unsupported account eligibility, or missing capacity. The tool does not attempt to bypass restrictions.
+The account must show `eligible: true` for `VARIANT_GPU / T4 / SHAPE_STANDARD`.
 
-### Read-only discovery (no GPU allocation)
+## Configure the gateway
+
+If upgrading from v1.2, first check `node bin/colabctl.mjs list` and remove any unused manually-created Colab runtime. Autopilot does not adopt these runtimes.
+
+Use the service installer:
 
 ```bash
-node bin/colabctl.mjs specs
+./scripts/install-service.sh
+```
+
+It writes `~/.config/openclaw-colab/gateway.env` with a generated API key and the settings below. Existing configuration files are preserved.
+
+```dotenv
+COLAB_GATEWAY_API_KEY=<generated-secret>
+COLAB_MODEL=qwen3:4b-instruct-2507-q4_K_M
+COLAB_GATEWAY_PORT=18080
+COLAB_IDLE_MINUTES=30
+COLAB_DELETE_OWNED_RUNTIME_ON_IDLE=yes
+```
+
+Keep the API key private. Protect the file with `chmod 600 ~/.config/openclaw-colab/gateway.env`.
+
+Autopilot only starts a Colab runtime on the **first chat request**. The first request can take several minutes because runtime allocation, package installation and model download occur before inference. Consecutive requests reuse the session and loaded model.
+
+Check the service:
+
+```bash
+systemctl --user status openclaw-colab-gateway
+journalctl --user -u openclaw-colab-gateway -f
+```
+
+To keep user services running after logout:
+
+```bash
+sudo loginctl enable-linger "$USER"
+loginctl show-user "$USER" -p Linger
+```
+
+The legacy `colabgateway.mjs` and manual `colabctl.mjs`/`colabmcp.mjs` commands remain included. Do not run the legacy gateway and Autopilot simultaneously on port 18080.
+
+## Test
+
+In another terminal:
+
+```bash
+source ~/.config/openclaw-colab/gateway.env
+curl -fsS http://127.0.0.1:18080/v1/chat/completions \
+  -H "Authorization: Bearer $COLAB_GATEWAY_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"colab-t4","stream":false,"messages":[{"role":"user","content":"Explain Kubernetes in one sentence."}]}' | jq .
+```
+
+A successful response contains `choices[0].message.content`. `GET /healthz` and `GET /v1/models` use the same bearer key.
+
+## Configure OpenClaw
+
+Register a custom model provider pointing at the local gateway:
+
+```bash
+source ~/.config/openclaw-colab/gateway.env
+cp -a ~/.openclaw/openclaw.json ~/.openclaw/openclaw.json.bak.$(date +%Y%m%d-%H%M%S)
+openclaw config set models.providers.colab "$(jq -nc --arg key "$COLAB_GATEWAY_API_KEY" '{baseUrl:"http://127.0.0.1:18080/v1",apiKey:$key,auth:"api-key",api:"openai-completions",timeoutSeconds:600,request:{allowPrivateNetwork:true},models:[{id:"colab-t4",name:"Qwen3 4B via Colab T4",reasoning:false,input:["text"],contextWindow:4096,maxTokens:1024,cost:{input:0,output:0,cacheRead:0,cacheWrite:0}}]}')" --strict-json
+openclaw config validate
+openclaw models list
+```
+
+This registers `colab/colab-t4`. It does not change your default model, agents, Telegram rules or Smart Router plugin. Routing and fallback must be configured separately.
+
+## Runtime ownership and shutdown
+
+The gateway records the runtime it creates in `~/.config/openclaw-colab/autopilot-state.json`. Only that runtime can be removed automatically. The state file must be kept between service restarts. It does not adopt existing runtimes created through Colab browser or `colabctl`.
+
+When there are no in-flight chat requests for `COLAB_IDLE_MINUTES`, the gateway deletes its own runtime. The local HTTP service stays online. A new request provisions a new runtime and downloads the model again.
+
+**Stop GPU costs:** stopping the systemd service does **not** delete an allocated runtime. Check existing runtimes and delete an unused runtime manually:
+
+```bash
 node bin/colabctl.mjs list
-node bin/colabctl.mjs subscription
+node bin/colabctl.mjs delete runtimes/ACTUAL_RUNTIME_ID --confirm-delete
 ```
 
-The `specs` response includes a `runtimeSpecs` array and eligibility flags. **Array indices are zero-based** and used by the create command. `list` and `get` redact runtime connection tokens.
+Never delete a runtime that is actively used elsewhere. The gateway cannot detect browser jobs or third-party Jupyter clients on its runtime. Do not change the model or runtime ownership state while a request is active.
 
-### Provision a runtime (manual, opt-in)
-
-Only after confirming eligibility and budget:
+## Operations
 
 ```bash
-node bin/colabctl.mjs specs
-node bin/colabctl.mjs create --spec 0 --confirm-create
+systemctl --user restart openclaw-colab-gateway
+systemctl --user stop openclaw-colab-gateway
+systemctl --user disable --now openclaw-colab-gateway
 node bin/colabctl.mjs list
-```
-
-The `--spec` index is illustrative, not a recommendation; inspect the actual returned key and eligibility before choosing. `create` returns a long-running **Operation**, not necessarily an immediately usable runtime. The beta does not poll operations or start a model automatically. Creating resources may consume compute units.
-
-### Delete a runtime assignment
-
-```bash
-node bin/colabctl.mjs delete runtimes/YOUR_RUNTIME_ID --confirm-delete
-```
-
-This unassigns the selected runtime and can discard ephemeral notebook state. Do not delete runtimes containing work you need. The Colab API recommends reusing existing runtimes where practical.
-
-## Ollama + Hugging Face proof of concept
-
-See [`notebooks/colab-ollama-experiment.ipynb`](notebooks/colab-ollama-experiment.ipynb). It deliberately **does not** automatically run arbitrary installation scripts, pull models, or expose Ollama on the public internet. The GPU diagnostic cell is executable. The rest are reviewed/manual instructions for an interactive Colab session. Ollama's model catalog is distinct from directly downloading GGUF files from Hugging Face.
-
-A future release may support model presets via Hugging Face Hub, secure Jupyter-kernel execution using the API-issued short-lived runtime proxy token, and user-approved remote inference. This is not implemented in v1.
-
-## Tests
-
-```bash
+node bin/colabmcp.mjs gpu status
 npm test
-npm run check
 ```
 
-Tests mock the REST API. No GPU or Google credentials are needed.
+### Troubleshooting
 
-## Limitations and safety
+| Symptom | Check |
+|---|---|
+| `Unauthorized` | Gateway API key in `gateway.env` must match the bearer token. |
+| `EADDRINUSE` | Stop the manually launched gateway or any other process on port 18080. |
+| OAuth authentication fails | Renew ADC login, confirm the OAuth test user and Colab scope. |
+| T4 is not eligible | Verify the account's `specs` output and available compute units. |
+| First request times out | Initial bootstrap can take minutes; inspect the service logs and `colabctl list`. |
+| Ollama bootstrap error | Inspect the returned error; the Colab runtime needs working `apt`, network access and NVIDIA GPU support. |
 
-- **No guaranteed Google AI Pro entitlement** for Colab Runtime API. Check actual eligibility before allocating a runtime.
-- No on-demand model inference, startup automation, Hugging Face downloading, health polling, auto-shutdown or cost accounting in v1.
-- No Ollama public tunnel: Colab managed runtimes restrict unrelated public web-service hosting. Avoid exposing unauthenticated inference ports.
-- `COLAB_ACCESS_TOKEN` is an ephemeral credential. Protect your shell and process environment.
-- Runtime assignment deletion is destructive for ephemeral state.
-- Google runtime connection info includes sensitive tokens. The CLI redacts these from display.
-- Read-only Telegram help does not send messages to Google and is off by default.
+## Limitations
 
-References: [Colab API](https://developers.google.com/colab/api/reference/rest), [Colab FAQ](https://research.google.com/colaboratory/faq.html), [OpenClaw plugin installation](https://docs.openclaw.ai/tools/plugin).
+- Text chat completions only; `stream: true`, tool calling, image inputs and structured outputs are not implemented.
+- The first request includes runtime provisioning, Ollama installation and model download. Model files are not persisted after the Colab runtime is deleted.
+- There is no automatic failover to another provider inside this gateway. Configure fallback in OpenClaw or Smart Router separately.
+- OAuth ADC credentials and Colab API access are account-dependent. The Colab API and its quotas may change.
+- The gateway serializes requests to a single Jupyter session. It is designed for a trusted local host, not as a public multi-user API.
 
-## License
+## Other commands
 
-MIT. Community project, not affiliated with Google, NVIDIA, or OpenClaw.
+```bash
+node bin/colabctl.mjs help
+node bin/colabmcp.mjs --help
+```
+
+License: MIT.
+
+## Runtime creation and recovery
+
+`create_runtime` may return an operation name (`operations/...`) before the runtime appears. Autopilot waits for the newly created T4 Standard runtime to become visible. If a T4 Standard runtime is already present but not recorded in the Autopilot state file, Autopilot stops rather than creating another one or claiming ownership. Inspect your runtimes with:
+
+```bash
+node bin/colabmcp.mjs runtimes
+```
+
+An existing unmanaged runtime can be removed explicitly using `colabctl delete` after confirming it is unused. The legacy `colabctl` requires `COLAB_ACCESS_TOKEN` to be set; MCP CLI commands refresh ADC credentials automatically.
+
+## Runtime cleanup
+
+Autopilot clears its owned-runtime state if the runtime was already removed by Colab. Other runtimes are never adopted or deleted. A missing owned runtime is rediscovered on the next request.

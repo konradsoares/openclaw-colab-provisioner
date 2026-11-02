@@ -4,6 +4,11 @@ node_modules/
 !.env.example
 *.token
 *credentials*.json
+autopilot-state.json
 *.log
 .DS_Store
 .ipynb_checkpoints/
+
+# Local development backups
+*.bak
+*.bak.*

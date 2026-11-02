@@ -1,11 +1,25 @@
 {
   "name": "openclaw-colab-provisioner-community",
-  "version": "1.0.0-beta.1",
+  "version": "1.3.0-beta.3",
   "type": "module",
-  "description": "Opt-in Google Colab runtime management for OpenClaw",
+  "description": "Google Colab MCP runtime autopilot and OpenAI-compatible local gateway for OpenClaw",
   "license": "MIT",
-  "bin": {"colabctl": "./bin/colabctl.mjs"},
-  "scripts": {"test":"node --test tests/*.test.mjs", "check":"node --check index.js && node --check lib/colab-api.mjs && node --check bin/colabctl.mjs"},
-  "engines":{"node":">=22"},
-  "openclaw":{"extensions":["./index.js"]}
+  "bin": {
+    "colabctl": "./bin/colabctl.mjs",
+    "colabmcp": "./bin/colabmcp.mjs",
+    "colabgateway": "./bin/colabgateway.mjs",
+    "colabautopilot": "./bin/colabautopilot.mjs"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "check": "node --check index.js && for f in bin/*.mjs lib/*.mjs; do node --check \"$f\" || exit 1; done"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.js"
+    ]
+  }
 }
