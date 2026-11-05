@@ -175,3 +175,23 @@ test('unrelated model errors never cause session replacement or GPU creation',as
   assert.equal(created,0);assert.equal(a.state.session,'runtimes/r-test123/sessions/old');
  } finally {await rm(dir,{recursive:true,force:true});}
 });
+
+test('runtime visibility checks existing, missing and absent without provisioning',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'colab-visible-'));
+ let listed=true,calls=[];
+ const mcp=async(name)=>{
+  calls.push(name);
+  if(name==='list_runtimes')return {runtimes:listed?[{name:'runtimes/r-test123'}]:[]};
+  throw Error('Status probe must not call '+name);
+ };
+ try{
+  const a=new Autopilot({mcp,stateFile:join(dir,'state.json')});
+  assert.deepEqual(await a.runtimeStatus(),{status:'absent',runtime:null});
+  await a.save({owned:true,runtime:'runtimes/r-test123',session:'runtimes/r-test123/sessions/known',ready:true});
+  assert.deepEqual(await a.runtimeStatus(),{status:'existing',runtime:'runtimes/r-test123'});
+  listed=false;
+  assert.deepEqual(await a.runtimeStatus(),{status:'missing',runtime:'runtimes/r-test123'});
+  assert.equal(a.state.runtime,'runtimes/r-test123');
+  assert.deepEqual(calls,['list_runtimes','list_runtimes']);
+ }finally{await rm(dir,{recursive:true,force:true});}
+});

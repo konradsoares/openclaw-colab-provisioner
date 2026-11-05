@@ -16,7 +16,8 @@ const gateway=createGateway({
   resolveSession:async()=>autopilot.ensure(),
   model,apiKey:env.COLAB_GATEWAY_API_KEY,
   port:Number(env.COLAB_GATEWAY_PORT||18080),idleMinutes,
-  onIdle:()=>autopilot.release()
+  onIdle:()=>autopilot.release(),
+  runtimeStatus:()=>autopilot.runtimeStatus()
 });
 await gateway.start();
 process.on('SIGTERM',()=>gateway.shutdown());

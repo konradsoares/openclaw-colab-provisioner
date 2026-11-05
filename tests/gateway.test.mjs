@@ -199,3 +199,28 @@ test('accepts structured OpenAI text-only content and rejects non-text blocks',(
  assert.equal(payload.messages[0].content,'hello\nworld');
  assert.throws(()=>validateChat({messages:[{role:'user',content:[{type:'image_url',image_url:{url:'https://invalid'}}]}]}),/Only structured text parts/);
 });
+
+test('runtime status endpoint is authenticated, read-only and does not reset idle timeout',async()=>{
+ let clock=0,tick,releases=0,probes=0;
+ const g=createGateway({
+  session,port:0,apiKey:'secret',idleMinutes:30,
+  now:()=>clock,scheduleInterval:fn=>{tick=fn;return {unref(){}};},cancelInterval:()=>{},
+  runtimeStatus:async()=>{probes++;return {status:'existing',runtime:'runtimes/r-test'};},
+  onIdle:async()=>{releases++;},
+  logger:{log(){},error(){}}
+ });
+ const srv=await g.start();
+ const url='http://127.0.0.1:'+srv.address().port+'/v1/runtime-status';
+ try{
+  assert.equal((await fetch(url)).status,401);
+  clock=29*60_000;
+  const response=await fetch(url,{headers:{authorization:'Bearer secret'}});
+  assert.equal(response.status,200);
+  assert.deepEqual(await response.json(),{status:'existing',runtime:'runtimes/r-test'});
+  assert.equal(probes,1);
+  clock=30*60_000;
+  await tick();
+  assert.equal(releases,1);
+  assert.equal(g.stats.requests,0);
+ }finally{await g.shutdown();}
+});

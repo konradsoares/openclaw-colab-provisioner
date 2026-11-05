@@ -197,3 +197,7 @@ When Autopilot reuses an owned runtime marked ready, it checks Ollama on first r
 For agent workloads, configure the profile model `contextWindow` and `COLAB_NUM_CTX` consistently (for example 32768 in staging); larger contexts use more Colab GPU memory. The default remains 4096 unless explicitly configured.
 
 OpenAI structured message arrays are accepted when every part is text; non-text/multimodal parts are rejected.
+
+### Runtime visibility (experimental)
+
+GET /v1/runtime-status is an authenticated, loopback-only endpoint returning status (absent, missing, starting, or existing) and runtime (an opaque ID). The request makes at most one read-only Colab list_runtimes call, never provisions a runtime, and does not reset the gateway's idle timer. Existing means Colab still lists a previously ready owned runtime; it does not guarantee the model has passed a fresh Ollama health check. The router can compare runtime IDs before and after an inference to report reuse or replacement.
