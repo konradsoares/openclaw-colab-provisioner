@@ -117,6 +117,8 @@ This registers `colab/colab-t4`. It does not change your default model, agents, 
 
 The gateway records the runtime it creates in `~/.config/openclaw-colab/autopilot-state.json`. Only that runtime can be removed automatically. The state file must be kept between service restarts. It does not adopt existing runtimes created through Colab browser or `colabctl`.
 
+Only authenticated, valid chat requests (and completion of in-flight requests) reset the idle timer. Health checks, unauthorized requests, and malformed chat requests do not keep the GPU allocated. The default timeout is 30 minutes, and the timer is based on gateway activity, not the Colab provider's own lifetime policy.
+
 When there are no in-flight chat requests for `COLAB_IDLE_MINUTES`, the gateway deletes its own runtime. The local HTTP service stays online. A new request provisions a new runtime and downloads the model again.
 
 **Stop GPU costs:** stopping the systemd service does **not** delete an allocated runtime. Check existing runtimes and delete an unused runtime manually:
