@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Session recovery
+- Recreate an expired session within the same owned Colab runtime when the provider explicitly reports a missing session. Avoid GPU reprovisioning for this case.
+- Add tests for safe recovery and unrelated upstream errors.
+
+
+### Runtime health
+- Check the Ollama model before reusing a previously ready runtime (five-minute probe cache); bootstrap again in the owned session when model health fails, without creating a new GPU.
+- Add deterministic tests for healthy reuse and model recovery.
+
+
 ### Added
 - Adapt OpenAI function tools and tool-result history to Ollama messages. Return OpenAI tool_calls without executing tools on the gateway.
 - Add a simulated two-turn tool-call roundtrip and validation tests.
