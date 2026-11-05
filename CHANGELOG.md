@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+- Authenticated, read-only Colab runtime visibility endpoint for Telegram status reporting, without keep-alive or new GPU allocation.
+
+
 ### Structured text compatibility
 - Accept text-only OpenAI message content parts and flatten them for Ollama; reject non-text inputs.
 
