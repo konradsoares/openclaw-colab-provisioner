@@ -5,7 +5,7 @@ import {createGateway,validateChat,makePython,parseExecution,formatAssistant} fr
 const session='runtimes/r-test/sessions/smart-router';
 test('validates messages and unsupported streaming',()=>{
   assert.equal(validateChat({model:'colab-t4',messages:[{role:'user',content:'hi'}]}).model,'qwen3:4b-instruct-2507-q4_K_M');
-  assert.throws(()=>validateChat({messages:[{role:'user',content:'hi'}],stream:true}),/Streaming/);
+  assert.equal(validateChat({messages:[{role:'user',content:'hi'}],stream:true}).stream,false);
   assert.throws(()=>validateChat({messages:[{role:'user',content:'hi'}],tools:[{}]}),/function tools/);
 });
 test('embeds safe base64 payload, no direct Python interpolation',()=>{
@@ -160,4 +160,42 @@ test('returns OpenAI tool_calls and executes no tools inside gateway',async()=>{
   assert.equal(seen[0].name,'execute_code');
   assert.equal(seen[1].name,'execute_code');
  } finally {await gateway.shutdown();}
+});
+
+test('configurable Ollama context matches OpenClaw staging profile',()=>{ const prev=process.env.COLAB_NUM_CTX; try {process.env.COLAB_NUM_CTX='32768'; assert.equal(validateChat({messages:[{role:'user',content:'hi'}]}).options.num_ctx,32768);process.env.COLAB_NUM_CTX='99999';assert.throws(()=>validateChat({messages:[{role:'user',content:'hi'}]}),/COLAB_NUM_CTX/);} finally {if(prev===undefined) delete process.env.COLAB_NUM_CTX;else process.env.COLAB_NUM_CTX=prev;}});
+
+test('streams OpenAI-compatible SSE chunks with final stop and DONE',async()=>{
+ const gateway=createGateway({session,port:0,mcpCall:async()=>({stdout:'__COLAB_GATEWAY_RESULT__='+JSON.stringify({ok:true,data:{message:{role:'assistant',content:'hello'},prompt_eval_count:1,eval_count:2}})}),logger:{log(){},error(){}}});
+ const server=await gateway.start();
+ try {
+  const url='http://127.0.0.1:'+server.address().port+'/v1/chat/completions';
+  const res=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({stream:true,stream_options:{include_usage:true},messages:[{role:'user',content:'hi'}]})});
+  assert.equal(res.status,200);assert.match(res.headers.get('content-type'),/text\/event-stream/);
+  const text=await res.text();
+  assert.match(text,/data: \[DONE\]/);
+  const events=text.split('\n\n').filter(x=>x.startsWith('data: {')).map(x=>JSON.parse(x.slice(6)));
+  assert.equal(events[0].choices[0].delta.role,'assistant');
+  assert.ok(events.some(x=>x.choices[0]?.delta?.content==='hello'));
+  assert.ok(events.some(x=>x.choices[0]?.finish_reason==='stop'));
+  assert.ok(events.some(x=>x.choices.length===0 && x.usage.total_tokens===3));
+ } finally {await gateway.shutdown();}
+});
+test('SSE returns tool_calls compatible with OpenAI streaming',async()=>{
+ const result={message:{role:'assistant',content:'',tool_calls:[{function:{name:'lookup',arguments:{term:'foo'}}}]}};
+ const gateway=createGateway({session,port:0,mcpCall:async()=>({stdout:'__COLAB_GATEWAY_RESULT__='+JSON.stringify({ok:true,data:result})}),logger:{log(){},error(){}}});
+ const server=await gateway.start();
+ try{
+  const response=await fetch('http://127.0.0.1:'+server.address().port+'/v1/chat/completions',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({stream:true,messages:[{role:'user',content:'search'}],tools:[{type:'function',function:{name:'lookup',parameters:{type:'object'}}}]})});
+  assert.equal(response.status,200);
+  const events=(await response.text()).split('\n\n').filter(s=>s.startsWith('data: {')).map(x=>JSON.parse(x.slice(6)));
+  const call=events.find(x=>x.choices[0]?.delta?.tool_calls)?.choices[0].delta.tool_calls[0];
+  assert.equal(call.function.name,'lookup');assert.equal(JSON.parse(call.function.arguments).term,'foo');
+  assert.ok(events.some(x=>x.choices[0]?.finish_reason==='tool_calls'));
+ }finally{await gateway.shutdown();}
+});
+
+test('accepts structured OpenAI text-only content and rejects non-text blocks',()=>{
+ const payload=validateChat({messages:[{role:'user',content:[{type:'text',text:'hello'},{type:'input_text',text:'world'}]}]});
+ assert.equal(payload.messages[0].content,'hello\nworld');
+ assert.throws(()=>validateChat({messages:[{role:'user',content:[{type:'image_url',image_url:{url:'https://invalid'}}]}]}),/Only structured text parts/);
 });

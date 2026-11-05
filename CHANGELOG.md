@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Structured text compatibility
+- Accept text-only OpenAI message content parts and flatten them for Ollama; reject non-text inputs.
+
+
+### OpenClaw streaming compatibility
+- Accept streamed OpenAI chat requests and serialize completed Ollama responses as SSE chunks, including tool calls and optional usage.
+- Add SSE regression tests for text and tool calls.
+
+
 ### Session recovery
 - Recreate an expired session within the same owned Colab runtime when the provider explicitly reports a missing session. Avoid GPU reprovisioning for this case.
 - Add tests for safe recovery and unrelated upstream errors.

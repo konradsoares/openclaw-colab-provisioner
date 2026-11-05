@@ -188,8 +188,12 @@ Autopilot clears its owned-runtime state if the runtime was already removed by C
 
 The Colab gateway now forwards function-tool definitions to Ollama and returns OpenAI-compatible `tool_calls`. OpenClaw remains responsible for executing tools; no arbitrary tools run inside the gateway. Follow-up requests must include the assistant tool call, matching `tool_call_id`, tool results and relevant conversation history. This gateway does not store conversation memory.
 
-`tool_choice` supports `auto` and `none`; forced/required tools, streaming, multimodal messages and structured outputs remain unsupported. The configured Ollama model must actually support tools. Actual Colab GPU and OpenClaw integration testing remains pending.
+`tool_choice` supports `auto` and `none`; forced/required tools, native token-by-token streaming, multimodal messages and structured outputs remain unsupported. Requests with `stream:true` receive OpenAI-compatible SSE chunks after a complete Ollama response (not incremental model tokens). The configured Ollama model must actually support tools. Actual Colab GPU and OpenClaw integration testing remains pending.
 
 ### Owned runtime model health (staging)
 
 When Autopilot reuses an owned runtime marked ready, it checks Ollama on first reuse in the running process and at most once per five minutes thereafter. If the Ollama model is unavailable, Autopilot re-runs bootstrap inside the existing session rather than allocating another GPU. If an owned Colab session is explicitly reported missing, Autopilot creates a replacement session inside that same owned runtime, then bootstraps Ollama again. Unrelated errors are not treated as missing sessions, and it does not allocate a second GPU for session recovery. These checks require a live session and do not guarantee that the Colab provider will retain the runtime for the full local idle timeout.
+
+For agent workloads, configure the profile model `contextWindow` and `COLAB_NUM_CTX` consistently (for example 32768 in staging); larger contexts use more Colab GPU memory. The default remains 4096 unless explicitly configured.
+
+OpenAI structured message arrays are accepted when every part is text; non-text/multimodal parts are rejected.
