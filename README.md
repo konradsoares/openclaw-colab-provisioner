@@ -182,3 +182,10 @@ An existing unmanaged runtime can be removed explicitly using `colabctl delete` 
 ## Runtime cleanup
 
 Autopilot clears its owned-runtime state if the runtime was already removed by Colab. Other runtimes are never adopted or deleted. A missing owned runtime is rediscovered on the next request.
+
+
+### OpenAI-compatible tool calling (staging)
+
+The Colab gateway now forwards function-tool definitions to Ollama and returns OpenAI-compatible `tool_calls`. OpenClaw remains responsible for executing tools; no arbitrary tools run inside the gateway. Follow-up requests must include the assistant tool call, matching `tool_call_id`, tool results and relevant conversation history. This gateway does not store conversation memory.
+
+`tool_choice` supports `auto` and `none`; forced/required tools, streaming, multimodal messages and structured outputs remain unsupported. The configured Ollama model must actually support tools. Actual Colab GPU and OpenClaw integration testing remains pending.

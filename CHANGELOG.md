@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Added
+- Adapt OpenAI function tools and tool-result history to Ollama messages. Return OpenAI tool_calls without executing tools on the gateway.
+- Add a simulated two-turn tool-call roundtrip and validation tests.
+
+
 ### Fixed
 - Authenticated, valid chat activity is now the only input that resets the gateway idle clock; health probes and unauthorized traffic cannot indefinitely retain a GPU.
 
