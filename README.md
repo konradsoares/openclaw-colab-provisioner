@@ -117,6 +117,8 @@ This registers `colab/colab-t4`. It does not change your default model, agents, 
 
 The gateway records the runtime it creates in `~/.config/openclaw-colab/autopilot-state.json`. Only that runtime can be removed automatically. The state file must be kept between service restarts. It does not adopt existing runtimes created through Colab browser or `colabctl`.
 
+Only authenticated, valid chat requests (and completion of in-flight requests) reset the idle timer. Health checks, unauthorized requests, and malformed chat requests do not keep the GPU allocated. The default timeout is 30 minutes, and the timer is based on gateway activity, not the Colab provider's own lifetime policy.
+
 When there are no in-flight chat requests for `COLAB_IDLE_MINUTES`, the gateway deletes its own runtime. The local HTTP service stays online. A new request provisions a new runtime and downloads the model again.
 
 **Stop GPU costs:** stopping the systemd service does **not** delete an allocated runtime. Check existing runtimes and delete an unused runtime manually:
@@ -180,3 +182,18 @@ An existing unmanaged runtime can be removed explicitly using `colabctl delete` 
 ## Runtime cleanup
 
 Autopilot clears its owned-runtime state if the runtime was already removed by Colab. Other runtimes are never adopted or deleted. A missing owned runtime is rediscovered on the next request.
+
+
+### OpenAI-compatible tool calling (staging)
+
+The Colab gateway now forwards function-tool definitions to Ollama and returns OpenAI-compatible `tool_calls`. OpenClaw remains responsible for executing tools; no arbitrary tools run inside the gateway. Follow-up requests must include the assistant tool call, matching `tool_call_id`, tool results and relevant conversation history. This gateway does not store conversation memory.
+
+`tool_choice` supports `auto` and `none`; forced/required tools, native token-by-token streaming, multimodal messages and structured outputs remain unsupported. Requests with `stream:true` receive OpenAI-compatible SSE chunks after a complete Ollama response (not incremental model tokens). The configured Ollama model must actually support tools. Actual Colab GPU and OpenClaw integration testing remains pending.
+
+### Owned runtime model health (staging)
+
+When Autopilot reuses an owned runtime marked ready, it checks Ollama on first reuse in the running process and at most once per five minutes thereafter. If the Ollama model is unavailable, Autopilot re-runs bootstrap inside the existing session rather than allocating another GPU. If an owned Colab session is explicitly reported missing, Autopilot creates a replacement session inside that same owned runtime, then bootstraps Ollama again. Unrelated errors are not treated as missing sessions, and it does not allocate a second GPU for session recovery. These checks require a live session and do not guarantee that the Colab provider will retain the runtime for the full local idle timeout.
+
+For agent workloads, configure the profile model `contextWindow` and `COLAB_NUM_CTX` consistently (for example 32768 in staging); larger contexts use more Colab GPU memory. The default remains 4096 unless explicitly configured.
+
+OpenAI structured message arrays are accepted when every part is text; non-text/multimodal parts are rejected.

@@ -96,3 +96,82 @@ test('recover stale state then provisions new runtime',async()=>{
  try{const a=new Autopilot({mcp,stateFile:join(dir,'s.json'),pollMs:1});await a.save({owned:true,runtime:'runtimes/r-old',session:'runtimes/r-old/sessions/openclaw-autopilot',ready:true});assert.match(await a.ensure(),/runtimes\/r-new\/sessions/);assert.equal(a.state.runtime,'runtimes/r-new');}
  finally{await rm(dir,{recursive:true,force:true});}
 });
+
+test('health probes are cached and do not create a second runtime',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'colab-health-'));
+ let time=1,created=0,probes=0,bootstrap=0;
+ const mcp=async(name,args)=>{
+  if(name==='list_runtimes')return {runtimes:[{name:'runtimes/r-test123',runtimeSpec:spec}]};
+  if(name==='execute_code'){
+   if(args.code.includes('/api/tags'))probes++;else bootstrap++;
+   return {stdout:marker+'{"ready":true}'};
+  }
+  if(name==='create_runtime'){created++;throw Error('Must reuse runtime');}
+  throw Error(name);
+ };
+ try {
+  const a=new Autopilot({mcp,stateFile:join(dir,'state.json'),now:()=>time,healthCheckMs:300000});
+  await a.save({owned:true,runtime:'runtimes/r-test123',session:'runtimes/r-test123/sessions/openclaw-autopilot',ready:true});
+  await a.ensure();assert.equal(probes,1);
+  time=60_000;await a.ensure();assert.equal(probes,1);
+  time=301_000;await a.ensure();assert.equal(probes,2);
+  assert.equal(created,0);assert.equal(bootstrap,0);
+ } finally {await rm(dir,{recursive:true,force:true});}
+});
+test('unhealthy Ollama reboots model in same owned runtime without reprovisioning',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'colab-health-'));
+ let created=0,probes=0,bootstraps=0;
+ const mcp=async(name,args)=>{
+  if(name==='list_runtimes')return {runtimes:[{name:'runtimes/r-test123',runtimeSpec:spec}]};
+  if(name==='execute_code'){
+   if(args.code.includes('/api/tags')){probes++;return {stdout:marker+'{"ready":false,"error":"offline"}'};}
+   bootstraps++;return {stdout:marker+'{"ready":true}'};
+  }
+  if(name==='create_runtime'){created++;throw Error('Should not provision again');}
+  throw Error(name);
+ };
+ try {
+  const a=new Autopilot({mcp,stateFile:join(dir,'state.json'),now:()=>123,healthCheckMs:300000,logger:{log(){}}});
+  await a.save({owned:true,runtime:'runtimes/r-test123',session:'runtimes/r-test123/sessions/openclaw-autopilot',ready:true});
+  assert.equal(await a.ensure(),'runtimes/r-test123/sessions/openclaw-autopilot');
+  assert.equal(probes,1);assert.equal(bootstraps,1);assert.equal(created,0);
+  assert.equal(a.state.ready,true);
+ } finally {await rm(dir,{recursive:true,force:true});}
+});
+
+test('missing session recovers inside owned runtime and never creates a second GPU',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'colab-recovery-'));
+ let createdRuntime=0,createdSession=0,healthChecks=0,bootstraps=0;
+ const mcp=async(name,args)=>{
+  if(name==='list_runtimes')return {runtimes:[{name:'runtimes/r-test123',runtimeSpec:spec}]};
+  if(name==='create_runtime'){createdRuntime++;throw Error('Unexpected GPU provisioning');}
+  if(name==='create_session'){createdSession++;assert.equal(args.parent,'runtimes/r-test123');return {name:'runtimes/r-test123/sessions/oc-recovered'};}
+  if(name==='execute_code'){
+   if(args.code.includes('/api/tags')){healthChecks++;throw Error('session not found: 404');}
+   bootstraps++;assert.equal(args.session,'runtimes/r-test123/sessions/oc-recovered');return {stdout:marker+'{"ready":true}'};
+  }
+  throw Error('Unexpected call '+name);
+ };
+ try {
+  const a=new Autopilot({mcp,stateFile:join(dir,'state.json'),now:()=>555,logger:{log(){}}});
+  await a.save({owned:true,runtime:'runtimes/r-test123',session:'runtimes/r-test123/sessions/old',ready:true});
+  assert.equal(await a.ensure(),'runtimes/r-test123/sessions/oc-recovered');
+  assert.equal(createdRuntime,0);assert.equal(createdSession,1);assert.equal(healthChecks,1);assert.equal(bootstraps,1);
+  assert.equal(a.state.ready,true);
+ } finally {await rm(dir,{recursive:true,force:true});}
+});
+test('unrelated model errors never cause session replacement or GPU creation',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'colab-recovery-'));let created=0;
+ const mcp=async(name)=>{
+  if(name==='list_runtimes')return {runtimes:[{name:'runtimes/r-test123',runtimeSpec:spec}]};
+  if(name==='execute_code')throw Error('GPU quota unavailable');
+  if(name==='create_runtime'||name==='create_session'){created++;throw Error('unexpected');}
+  throw Error(name);
+ };
+ try {
+  const a=new Autopilot({mcp,stateFile:join(dir,'state.json'),logger:{log(){}}});
+  await a.save({owned:true,runtime:'runtimes/r-test123',session:'runtimes/r-test123/sessions/old',ready:true});
+  await assert.rejects(a.ensure(),/GPU quota unavailable/);
+  assert.equal(created,0);assert.equal(a.state.session,'runtimes/r-test123/sessions/old');
+ } finally {await rm(dir,{recursive:true,force:true});}
+});
